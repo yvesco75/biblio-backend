@@ -11,7 +11,9 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Configuration multer pour upload de fichiers (compatible Vercel)
-const upload = multer({ dest: '/tmp/uploads/' });
+// Désactivé temporairement - utiliser memoryStorage pour Vercel
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
 
 // Middlewares
 app.use(cors());

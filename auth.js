@@ -1,9 +1,8 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const sqlite3 = require('sqlite3').verbose();
+const db = require('./database'); // Utilise le même système que server.js
 
-const SECRET_KEY = 'biblio_secret_2025_change_me';
-const db = new sqlite3.Database('./bibliotheque.db');
+const SECRET_KEY = process.env.JWT_SECRET || 'biblio_secret_2025_change_me';
 
 // Middleware pour vérifier le token
 function verifyToken(req, res, next) {
@@ -40,13 +39,11 @@ function login(username, password, callback) {
         return callback(null);
       }
 
-      // Comparer le mot de passe
       bcrypt.compare(password, admin.password, (err, isMatch) => {
         if (err || !isMatch) {
           return callback(null);
         }
 
-        // Créer un token valide 24h
         const token = jwt.sign(
           { 
             id: admin.id,
@@ -73,16 +70,13 @@ function changePassword(userId, oldPassword, newPassword, callback) {
         return callback(false, 'Admin introuvable');
       }
 
-      // Vérifier l'ancien mot de passe
       bcrypt.compare(oldPassword, admin.password, (err, isMatch) => {
         if (err || !isMatch) {
           return callback(false, 'Ancien mot de passe incorrect');
         }
 
-        // Hasher le nouveau mot de passe
         const hashedPassword = bcrypt.hashSync(newPassword, 10);
 
-        // Mettre à jour
         db.run(
           'UPDATE admins SET password = ? WHERE id = ?',
           [hashedPassword, userId],

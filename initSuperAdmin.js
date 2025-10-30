@@ -1,52 +1,53 @@
-// Script pour créer le super administrateur
-// À exécuter UNE SEULE FOIS : node initSuperAdmin.js
-
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
 
-const db = new sqlite3.Database('./bibliotheque.db');
-
-// Créer la table des admins
-db.serialize(() => {
-  // Table admins
-  db.run(`
-    CREATE TABLE IF NOT EXISTS admins (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      password TEXT NOT NULL,
-      role TEXT DEFAULT 'admin',
-      date_creation DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-  `, (err) => {
-    if (err) {
-      console.error('Erreur création table:', err);
-      return;
-    }
-    console.log('✅ Table admins créée');
-  });
-
-  // Hasher le mot de passe
-  const password = 'SuperAdmin2025!'; // MOT DE PASSE À CHANGER !
-  const hashedPassword = bcrypt.hashSync(password, 10);
-
-  // Insérer le super admin
-  db.run(
-    `INSERT OR REPLACE INTO admins (id, username, password, role) 
-     VALUES (1, 'superadmin', ?, 'superadmin')`,
-    [hashedPassword],
-    function(err) {
-      if (err) {
-        console.error('Erreur création super admin:', err);
-      } else {
-        console.log('\n🎉 SUPER ADMIN CRÉÉ AVEC SUCCÈS !');
-        console.log('================================');
-        console.log('Identifiant : superadmin');
-        console.log('Mot de passe :', password);
-        console.log('================================');
-        console.log('⚠️  CHANGEZ CE MOT DE PASSE après la première connexion !');
-      }
-      
-      db.close();
-    }
-  );
+const pool = new Pool({
+  connectionString: 'postgresql://neondb_owner:npg_WcxNm1beTn0s@ep-lingering-wildflower-adwox7i9-pooler.c-2.us-east-1.aws.neon.tech/neondb?sslmode=require',
+  ssl: { rejectUnauthorized: false }
 });
+
+async function init() {
+  try {
+    // Créer table admins
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS admins (
+        id SERIAL PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password TEXT NOT NULL,
+        role TEXT NOT NULL,
+        date_creation TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Table admins créée');
+
+    // Créer super admin
+    const hashedPassword = bcrypt.hashSync('SuperAdmin2025!', 10);
+    await pool.query(
+      `INSERT INTO admins (username, password, role) 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (username) DO NOTHING`,
+      ['superadmin', hashedPassword, 'superadmin']
+    );
+
+    // Créer admin normal
+    const hashedAdmin = bcrypt.hashSync('admin123', 10);
+    await pool.query(
+      `INSERT INTO admins (username, password, role) 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (username) DO NOTHING`,
+      ['admin', hashedAdmin, 'admin']
+    );
+
+    console.log('✅ Super admin et admin créés !');
+    console.log('superadmin / SuperAdmin2025!');
+    console.log('admin / admin123');
+    
+    await pool.end();
+    process.exit(0);
+  } catch (error) {
+    console.error('❌ Erreur:', error);
+    process.exit(1);
+  }
+}
+
+init();

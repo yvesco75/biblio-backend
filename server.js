@@ -10,8 +10,8 @@ const { verifyToken, verifySuperAdmin, login, changePassword, db: authDb } = req
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Configuration multer pour upload de fichiers
-const upload = multer({ dest: 'uploads/' });
+// Configuration multer pour upload de fichiers (compatible Vercel)
+const upload = multer({ dest: '/tmp/uploads/' });
 
 // Middlewares
 app.use(cors());

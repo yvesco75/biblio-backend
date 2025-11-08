@@ -5,15 +5,17 @@ const cors = require('cors');
 const multer = require('multer');
 const XLSX = require('xlsx');
 const bcrypt = require('bcryptjs');
-const { verifyToken, verifySuperAdmin, login, changePassword, db: authDb } = require('./auth');
+const { verifyToken, verifySuperAdmin, login, changePassword } = require('./auth');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Configuration multer pour upload de fichiers (compatible Vercel)
-// Désactivé temporairement - utiliser memoryStorage pour Vercel
+// Configuration multer pour Vercel (memoryStorage)
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB max
+});
 
 // Middlewares
 app.use(cors());
@@ -22,31 +24,8 @@ app.use(express.json());
 // CONNEXION À LA BASE DE DONNÉES
 const db = require('./database');
 
-// CRÉATION DES TABLES
-function initDatabase() {
-  db.run(`
-    CREATE TABLE IF NOT EXISTS membres (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nom TEXT NOT NULL,
-      prenom TEXT NOT NULL,
-      telephone TEXT UNIQUE NOT NULL,
-      date_inscription DATETIME DEFAULT CURRENT_TIMESTAMP,
-      statut TEXT DEFAULT 'actif'
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS mouvements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      membre_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      date_heure DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (membre_id) REFERENCES membres(id)
-    )
-  `);
-
-  console.log('✅ Tables créées');
-}
+// ⚠️ IMPORTANT : Les tables sont déjà créées dans database.js
+// Plus besoin de initDatabase() ici
 
 // ==================== ROUTES PUBLIQUES ====================
 
@@ -54,16 +33,16 @@ function initDatabase() {
 app.get('/api/search-membres/:telephone', (req, res) => {
   const { telephone } = req.params;
 
-  // Rechercher à partir de 3 chiffres
   if (telephone.length < 3) {
     return res.json([]);
   }
 
   db.all(
-    'SELECT id, nom, prenom, telephone, lien FROM membres WHERE telephone LIKE ? AND statut = "actif"',
-    [`%${telephone}%`],
+    'SELECT id, nom, prenom, telephone, lien FROM membres WHERE telephone LIKE ? AND statut = ?',
+    [`%${telephone}%`, 'actif'],
     (err, membres) => {
       if (err) {
+        console.error('Erreur recherche membres:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
       res.json(membres);
@@ -80,10 +59,11 @@ app.post('/api/pointer-by-id', (req, res) => {
   }
 
   db.get(
-    'SELECT * FROM membres WHERE id = ? AND statut = "actif"',
-    [membreId],
+    'SELECT * FROM membres WHERE id = ? AND statut = ?',
+    [membreId, 'actif'],
     (err, membre) => {
       if (err) {
+        console.error('Erreur récupération membre:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
       
@@ -95,6 +75,11 @@ app.post('/api/pointer-by-id', (req, res) => {
         'SELECT type FROM mouvements WHERE membre_id = ? ORDER BY date_heure DESC LIMIT 1',
         [membre.id],
         (err, dernierMouvement) => {
+          if (err) {
+            console.error('Erreur dernier mouvement:', err);
+            return res.status(500).json({ error: 'Erreur serveur' });
+          }
+
           const type = (dernierMouvement && dernierMouvement.type === 'entrée') ? 'sortie' : 'entrée';
 
           db.run(
@@ -102,6 +87,7 @@ app.post('/api/pointer-by-id', (req, res) => {
             [membre.id, type],
             function(err) {
               if (err) {
+                console.error('Erreur enregistrement mouvement:', err);
                 return res.status(500).json({ error: 'Erreur enregistrement' });
               }
 
@@ -110,7 +96,7 @@ app.post('/api/pointer-by-id', (req, res) => {
                 membre: {
                   nom: membre.nom,
                   prenom: membre.prenom,
-                  lien: membre.lien
+                  lien: membre.lien || 'Membre'
                 },
                 type: type,
                 message: `${type.toUpperCase()} enregistrée avec succès`
@@ -127,6 +113,10 @@ app.post('/api/pointer-by-id', (req, res) => {
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
 
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Identifiants requis' });
+  }
+
   login(username, password, (result) => {
     if (!result) {
       return res.status(401).json({ error: 'Identifiants incorrects' });
@@ -140,53 +130,6 @@ app.post('/api/login', (req, res) => {
       message: 'Connexion réussie' 
     });
   });
-});
-
-// POINTER (accessible sans authentification)
-app.post('/api/pointer', (req, res) => {
-  const { telephone } = req.body;
-
-  db.get(
-    'SELECT * FROM membres WHERE telephone = ? AND statut = "actif"',
-    [telephone],
-    (err, membre) => {
-      if (err) {
-        return res.status(500).json({ error: 'Erreur serveur' });
-      }
-      
-      if (!membre) {
-        return res.status(404).json({ error: 'Numéro non trouvé. Contactez l\'admin.' });
-      }
-
-      db.get(
-        'SELECT type FROM mouvements WHERE membre_id = ? ORDER BY date_heure DESC LIMIT 1',
-        [membre.id],
-        (err, dernierMouvement) => {
-          const type = (dernierMouvement && dernierMouvement.type === 'entrée') ? 'sortie' : 'entrée';
-
-          db.run(
-            'INSERT INTO mouvements (membre_id, type) VALUES (?, ?)',
-            [membre.id, type],
-            function(err) {
-              if (err) {
-                return res.status(500).json({ error: 'Erreur enregistrement' });
-              }
-
-              res.json({
-                success: true,
-                membre: {
-                  nom: membre.nom,
-                  prenom: membre.prenom
-                },
-                type: type,
-                message: `${type.toUpperCase()} enregistrée avec succès`
-              });
-            }
-          );
-        }
-      );
-    }
-  );
 });
 
 // ==================== ROUTES PROTÉGÉES (ADMIN) ====================
@@ -215,8 +158,11 @@ app.post('/api/change-password', verifyToken, (req, res) => {
 
 // LISTE DES ADMINS (super admin uniquement)
 app.get('/api/admins', verifyToken, verifySuperAdmin, (req, res) => {
+  const authDb = require('./auth').db;
+  
   authDb.all('SELECT id, username, role, date_creation FROM admins ORDER BY id', (err, admins) => {
     if (err) {
+      console.error('Erreur liste admins:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
     res.json(admins);
@@ -236,13 +182,15 @@ app.post('/api/admins', verifyToken, verifySuperAdmin, (req, res) => {
   }
 
   const hashedPassword = bcrypt.hashSync(password, 10);
+  const authDb = require('./auth').db;
 
   authDb.run(
     'INSERT INTO admins (username, password, role) VALUES (?, ?, ?)',
     [username, hashedPassword, 'admin'],
     function(err) {
       if (err) {
-        if (err.message.includes('UNIQUE')) {
+        console.error('Erreur ajout admin:', err);
+        if (err.message.includes('UNIQUE') || err.code === '23505') {
           return res.status(400).json({ error: 'Ce nom d\'utilisateur existe déjà' });
         }
         return res.status(500).json({ error: 'Erreur serveur' });
@@ -260,6 +208,7 @@ app.post('/api/admins', verifyToken, verifySuperAdmin, (req, res) => {
 // SUPPRIMER UN ADMIN (super admin uniquement)
 app.delete('/api/admins/:id', verifyToken, verifySuperAdmin, (req, res) => {
   const { id } = req.params;
+  const authDb = require('./auth').db;
 
   // Empêcher la suppression du super admin
   if (parseInt(id) === 1) {
@@ -268,6 +217,7 @@ app.delete('/api/admins/:id', verifyToken, verifySuperAdmin, (req, res) => {
 
   authDb.run('DELETE FROM admins WHERE id = ?', [id], function(err) {
     if (err) {
+      console.error('Erreur suppression admin:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
     res.json({ success: true, message: 'Admin supprimé' });
@@ -289,6 +239,10 @@ app.post('/api/membres', verifyToken, (req, res) => {
     [nom, prenom, telephone, lien || 'Membre'],
     function(err) {
       if (err) {
+        console.error('Erreur ajout membre:', err);
+        if (err.message.includes('UNIQUE') || err.code === '23505') {
+          return res.status(400).json({ error: 'Ce numéro de téléphone existe déjà' });
+        }
         return res.status(500).json({ error: 'Erreur serveur' });
       }
 
@@ -301,18 +255,22 @@ app.post('/api/membres', verifyToken, (req, res) => {
   );
 });
 
-// IMPORT EXCEL/CSV
+// IMPORT EXCEL/CSV - CORRIGÉ POUR VERCEL
 app.post('/api/import', verifyToken, upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'Aucun fichier fourni' });
   }
 
   try {
-    // Lire le fichier Excel/CSV
-    const workbook = XLSX.readFile(req.file.path);
+    // ✅ Lire depuis le buffer (memoryStorage)
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const sheet = workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(sheet);
+
+    if (data.length === 0) {
+      return res.status(400).json({ error: 'Le fichier est vide' });
+    }
 
     let importes = 0;
     let erreurs = 0;
@@ -322,23 +280,28 @@ app.post('/api/import', verifyToken, upload.single('file'), (req, res) => {
     const promises = data.map((row, index) => {
       return new Promise((resolve) => {
         const nom = row.nom || row.Nom || row.NOM;
-        const prenom = row.prenom || row.Prenom || row.PRENOM;
-        const telephone = row.telephone || row.Telephone || row.TELEPHONE;
+        const prenom = row.prenom || row.Prenom || row.PRENOM || row.Prénom;
+        const telephone = row.telephone || row.Telephone || row.TELEPHONE || row.Téléphone;
+        const lien = row.lien || row.Lien || row.LIEN || 'Membre';
 
         if (!nom || !prenom || !telephone) {
           erreurs++;
-          errors.push(`Ligne ${index + 2}: Données manquantes`);
+          errors.push(`Ligne ${index + 2}: Données manquantes (nom: ${nom}, prenom: ${prenom}, tel: ${telephone})`);
           resolve();
           return;
         }
 
         db.run(
-          'INSERT INTO membres (nom, prenom, telephone) VALUES (?, ?, ?)',
-          [nom, prenom, telephone],
+          'INSERT INTO membres (nom, prenom, telephone, lien) VALUES (?, ?, ?, ?)',
+          [nom.trim(), prenom.trim(), telephone.trim(), lien.trim()],
           function(err) {
             if (err) {
               erreurs++;
-              errors.push(`Ligne ${index + 2}: ${telephone} - ${err.message}`);
+              if (err.message.includes('UNIQUE') || err.code === '23505') {
+                errors.push(`Ligne ${index + 2}: ${telephone} existe déjà`);
+              } else {
+                errors.push(`Ligne ${index + 2}: ${err.message}`);
+              }
             } else {
               importes++;
             }
@@ -349,42 +312,42 @@ app.post('/api/import', verifyToken, upload.single('file'), (req, res) => {
     });
 
     Promise.all(promises).then(() => {
-      // Supprimer le fichier temporaire
-      const fs = require('fs');
-      fs.unlinkSync(req.file.path);
-
       res.json({
         success: true,
         message: `Import terminé: ${importes} ajoutés, ${erreurs} erreurs`,
         importes,
         erreurs,
-        errors: errors.length > 0 ? errors : undefined
+        errors: errors.length > 0 ? errors.slice(0, 10) : undefined // Limiter à 10 erreurs
       });
     });
 
   } catch (error) {
+    console.error('Erreur import:', error);
     res.status(500).json({ error: 'Erreur lecture fichier: ' + error.message });
   }
 });
 
 // EXPORT EXCEL
 app.get('/api/export/membres', verifyToken, (req, res) => {
-  db.all('SELECT * FROM membres WHERE statut = "actif"', (err, membres) => {
+  db.all('SELECT * FROM membres WHERE statut = ?', ['actif'], (err, membres) => {
     if (err) {
+      console.error('Erreur export membres:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
 
-    // Créer un fichier Excel
-    const ws = XLSX.utils.json_to_sheet(membres);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Membres');
+    try {
+      const ws = XLSX.utils.json_to_sheet(membres);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Membres');
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-    // Générer le buffer
-    const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-    res.setHeader('Content-Disposition', 'attachment; filename=membres.xlsx');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
+      res.setHeader('Content-Disposition', 'attachment; filename=membres.xlsx');
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.send(buffer);
+    } catch (error) {
+      console.error('Erreur génération Excel:', error);
+      res.status(500).json({ error: 'Erreur génération fichier' });
+    }
   });
 });
 
@@ -395,28 +358,35 @@ app.get('/api/export/mouvements', verifyToken, (req, res) => {
      FROM mouvements m 
      JOIN membres mb ON m.membre_id = mb.id 
      ORDER BY m.date_heure DESC`,
+    [],
     (err, mouvements) => {
       if (err) {
+        console.error('Erreur export mouvements:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
 
-      const ws = XLSX.utils.json_to_sheet(mouvements);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Mouvements');
+      try {
+        const ws = XLSX.utils.json_to_sheet(mouvements);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Mouvements');
+        const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
-
-      res.setHeader('Content-Disposition', 'attachment; filename=mouvements.xlsx');
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.send(buffer);
+        res.setHeader('Content-Disposition', 'attachment; filename=mouvements.xlsx');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+      } catch (error) {
+        console.error('Erreur génération Excel:', error);
+        res.status(500).json({ error: 'Erreur génération fichier' });
+      }
     }
   );
 });
 
 // LISTE DES MEMBRES
 app.get('/api/membres', verifyToken, (req, res) => {
-  db.all('SELECT * FROM membres ORDER BY nom', (err, membres) => {
+  db.all('SELECT * FROM membres ORDER BY nom', [], (err, membres) => {
     if (err) {
+      console.error('Erreur liste membres:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
     res.json(membres);
@@ -433,9 +403,10 @@ app.get('/api/mouvements', verifyToken, (req, res) => {
      JOIN membres mb ON m.membre_id = mb.id 
      ORDER BY m.date_heure DESC 
      LIMIT ?`,
-    [limit],
+    [parseInt(limit)],
     (err, mouvements) => {
       if (err) {
+        console.error('Erreur historique:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
       res.json(mouvements);
@@ -450,13 +421,15 @@ app.get('/api/presents', verifyToken, (req, res) => {
             m.date_heure as heure_entree
      FROM membres mb
      JOIN mouvements m ON mb.id = m.membre_id
-     WHERE m.type = 'entrée' 
+     WHERE m.type = ? 
      AND m.id = (
        SELECT MAX(id) FROM mouvements WHERE membre_id = mb.id
      )
      ORDER BY m.date_heure DESC`,
+    ['entrée'],
     (err, presents) => {
       if (err) {
+        console.error('Erreur présents:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
       res.json(presents);
@@ -468,24 +441,42 @@ app.get('/api/presents', verifyToken, (req, res) => {
 app.delete('/api/membres/:id', verifyToken, (req, res) => {
   const { id } = req.params;
 
-  db.run('UPDATE membres SET statut = "inactif" WHERE id = ?', [id], function(err) {
+  db.run('UPDATE membres SET statut = ? WHERE id = ?', ['inactif', id], function(err) {
     if (err) {
+      console.error('Erreur désactivation membre:', err);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
+    
+    if (this.changes === 0) {
+      return res.status(404).json({ error: 'Membre non trouvé' });
+    }
+
     res.json({ success: true, message: 'Membre désactivé' });
   });
+});
+
+// Route de test
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', message: 'API fonctionnelle' });
 });
 
 // ==================== DÉMARRAGE DU SERVEUR ====================
 app.listen(PORT, () => {
   console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-  console.log(`📊 Base de données : bibliotheque.db`);
-  console.log(`🔐 Admin par défaut : admin / admin123`);
+  console.log(`📊 Environnement : ${process.env.NODE_ENV || 'development'}`);
+  console.log(`🔐 JWT Secret configuré : ${process.env.JWT_SECRET ? 'Oui' : 'Non (utilise valeur par défaut)'}`);
 });
 
 process.on('SIGINT', () => {
-  db.close(() => {
-    console.log('🔴 Serveur arrêté');
-    process.exit(0);
-  });
+  console.log('🔴 Arrêt du serveur...');
+  process.exit(0);
+});
+
+// Gestion des erreurs non capturées
+process.on('uncaughtException', (error) => {
+  console.error('❌ Erreur non capturée:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Promise rejetée:', reason);
 });

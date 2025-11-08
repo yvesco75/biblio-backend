@@ -1,12 +1,15 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const db = require('./database'); // Utilise le même système que server.js
 
 const SECRET_KEY = process.env.JWT_SECRET || 'biblio_secret_2025_change_me';
 
+// Utiliser la même base de données que server.js
+const db = require('./database');
+
 // Middleware pour vérifier le token
 function verifyToken(req, res, next) {
-  const token = req.headers['authorization']?.split(' ')[1];
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
   if (!token) {
     return res.status(403).json({ error: 'Token manquant' });
@@ -17,7 +20,8 @@ function verifyToken(req, res, next) {
     req.user = decoded;
     next();
   } catch (error) {
-    return res.status(401).json({ error: 'Token invalide' });
+    console.error('Erreur vérification token:', error);
+    return res.status(401).json({ error: 'Token invalide ou expiré' });
   }
 }
 
@@ -31,16 +35,32 @@ function verifySuperAdmin(req, res, next) {
 
 // Vérifier les identifiants et générer un token
 function login(username, password, callback) {
+  if (!username || !password) {
+    return callback(null);
+  }
+
   db.get(
     'SELECT * FROM admins WHERE username = ?',
     [username],
     (err, admin) => {
-      if (err || !admin) {
+      if (err) {
+        console.error('Erreur recherche admin:', err);
+        return callback(null);
+      }
+
+      if (!admin) {
+        console.log('Admin non trouvé:', username);
         return callback(null);
       }
 
       bcrypt.compare(password, admin.password, (err, isMatch) => {
-        if (err || !isMatch) {
+        if (err) {
+          console.error('Erreur comparaison mot de passe:', err);
+          return callback(null);
+        }
+
+        if (!isMatch) {
+          console.log('Mot de passe incorrect pour:', username);
           return callback(null);
         }
 
@@ -54,7 +74,13 @@ function login(username, password, callback) {
           { expiresIn: '24h' }
         );
 
-        callback({ token, role: admin.role, username: admin.username });
+        console.log('✅ Connexion réussie:', username, '- Rôle:', admin.role);
+
+        callback({ 
+          token, 
+          role: admin.role, 
+          username: admin.username 
+        });
       });
     }
   );
@@ -62,16 +88,30 @@ function login(username, password, callback) {
 
 // Changer le mot de passe
 function changePassword(userId, oldPassword, newPassword, callback) {
+  if (!userId || !oldPassword || !newPassword) {
+    return callback(false, 'Paramètres manquants');
+  }
+
   db.get(
     'SELECT password FROM admins WHERE id = ?',
     [userId],
     (err, admin) => {
-      if (err || !admin) {
+      if (err) {
+        console.error('Erreur recherche admin:', err);
+        return callback(false, 'Erreur serveur');
+      }
+
+      if (!admin) {
         return callback(false, 'Admin introuvable');
       }
 
       bcrypt.compare(oldPassword, admin.password, (err, isMatch) => {
-        if (err || !isMatch) {
+        if (err) {
+          console.error('Erreur comparaison mot de passe:', err);
+          return callback(false, 'Erreur serveur');
+        }
+
+        if (!isMatch) {
           return callback(false, 'Ancien mot de passe incorrect');
         }
 
@@ -82,8 +122,11 @@ function changePassword(userId, oldPassword, newPassword, callback) {
           [hashedPassword, userId],
           (err) => {
             if (err) {
+              console.error('Erreur mise à jour mot de passe:', err);
               return callback(false, 'Erreur mise à jour');
             }
+            
+            console.log('✅ Mot de passe changé pour user ID:', userId);
             callback(true, 'Mot de passe changé avec succès');
           }
         );
@@ -97,5 +140,5 @@ module.exports = {
   verifySuperAdmin, 
   login, 
   changePassword,
-  db 
+  db // Exporter db pour les routes super admin
 };

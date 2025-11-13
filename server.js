@@ -462,7 +462,7 @@ app.get('/api/health', (req, res) => {
 
 // ==================== DÉMARRAGE DU SERVEUR ====================
 app.listen(PORT, () => {
-  console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+  console.log(`🚀 Serveur démarré sur le port ${PORT}`);
   console.log(`📊 Environnement : ${process.env.NODE_ENV || 'development'}`);
   console.log(`🔐 JWT Secret configuré : ${process.env.JWT_SECRET ? 'Oui' : 'Non (utilise valeur par défaut)'}`);
 });

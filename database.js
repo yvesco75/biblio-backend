@@ -38,32 +38,10 @@ const db = {
         }
       })
       .catch(err => {
-        console.error('Erreur PostgreSQL run:', err);
+        console.error('❌ Erreur PostgreSQL run:', err.message);
+        console.error('Requête:', pgQuery);
+        console.error('Params:', params);
         if (callback) callback(err);
-      });
-  },
-
-  get: (query, params, callback) => {
-    const pgQuery = convertQuery(query);
-    pool.query(pgQuery, params || [])
-      .then(result => callback(null, result.rows[0] || null))
-      .catch(err => {
-        console.error('Erreur PostgreSQL get:', err);
-        callback(err);
-      });
-  },
-
-  all: (query, params, callback) => {
-    if (typeof params === 'function') {
-      callback = params;
-      params = [];
-    }
-    const pgQuery = convertQuery(query);
-    pool.query(pgQuery, params || [])
-      .then(result => callback(null, result.rows))
-      .catch(err => {
-        console.error('Erreur PostgreSQL all:', err);
-        callback(err);
       });
   }
 };

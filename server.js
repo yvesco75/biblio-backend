@@ -230,13 +230,20 @@ app.delete('/api/admins/:id', verifyToken, verifySuperAdmin, (req, res) => {
 app.post('/api/membres', verifyToken, (req, res) => {
   const { nom, prenom, telephone, lien } = req.body;
 
+  // Validation téléphone
+  if (!/^\d{10,}$/.test(telephone)) {
+    return res.status(400).json({ 
+      error: 'Le téléphone doit contenir au moins 10 chiffres' 
+    });
+  }
+
   if (!nom || !prenom || !telephone) {
     return res.status(400).json({ error: 'Nom, prénom et téléphone sont requis' });
   }
 
   db.run(
     'INSERT INTO membres (nom, prenom, telephone, lien) VALUES (?, ?, ?, ?)',
-    [nom, prenom, telephone, lien || 'Membre'],
+    [nom.trim(), prenom.trim(), telephone.trim(), lien.trim() || 'Membre'],
     function(err) {
       if (err) {
         console.error('Erreur ajout membre:', err);
@@ -479,4 +486,74 @@ process.on('uncaughtException', (error) => {
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('❌ Promise rejetée:', reason);
+});
+
+// ==================== ROUTE STATISTIQUES (Compatible avec votre db abstraction) ====================
+app.get('/api/stats', verifyToken, (req, res) => {
+  // Compter les membres actifs
+  db.get(
+    'SELECT COUNT(*) as total FROM membres WHERE statut = ?',
+    ['actif'],
+    (err, membresResult) => {
+      if (err) {
+        console.error('❌ Erreur stats membres:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+
+      // Compter les personnes présentes
+      db.get(
+        `SELECT COUNT(DISTINCT membre_id) as total 
+         FROM mouvements m1 
+         WHERE type = ? 
+         AND id = (SELECT MAX(id) FROM mouvements WHERE membre_id = m1.membre_id)`,
+        ['entrée'],
+        (err, presentsResult) => {
+          if (err) {
+            console.error('❌ Erreur stats présents:', err);
+            return res.status(500).json({ error: 'Erreur serveur' });
+          }
+
+          res.json({
+            totalMembres: membresResult.total || 0,
+            presentsAujourdhui: presentsResult.total || 0
+          });
+        }
+      );
+    }
+  );
+});
+
+// ==================== ROUTE STATISTIQUES ====================
+app.get('/api/stats', verifyToken, (req, res) => {
+  // Compter les membres actifs
+  db.get(
+    'SELECT COUNT(*) as total FROM membres WHERE statut = ?',
+    ['actif'],
+    (err, membresResult) => {
+      if (err) {
+        console.error('❌ Erreur stats membres:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+
+      // Compter les personnes présentes
+      db.get(
+        `SELECT COUNT(DISTINCT membre_id) as total 
+         FROM mouvements m1 
+         WHERE type = ? 
+         AND id = (SELECT MAX(id) FROM mouvements WHERE membre_id = m1.membre_id)`,
+        ['entrée'],
+        (err, presentsResult) => {
+          if (err) {
+            console.error('❌ Erreur stats présents:', err);
+            return res.status(500).json({ error: 'Erreur serveur' });
+          }
+
+          res.json({
+            totalMembres: membresResult.total || 0,
+            presentsAujourdhui: presentsResult.total || 0
+          });
+        }
+      );
+    }
+  );
 });

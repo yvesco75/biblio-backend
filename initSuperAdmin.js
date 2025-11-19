@@ -39,9 +39,9 @@ async function init() {
       ['admin', hashedAdmin, 'admin']
     );
 
-    console.log('✅ Super admin et admin créés !');
-    console.log('superadmin / SuperAdmin2025!');
-    console.log('admin / admin123');
+    console.log('✅ Comptes créés :');
+    console.log('   superadmin / SuperAdmin2025!');
+    console.log('   admin / admin123');
     
     await pool.end();
     process.exit(0);

@@ -1,12 +1,9 @@
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
+const pool = require('./database');
 
 const SECRET_KEY = process.env.JWT_SECRET || 'biblio_secret_2025_change_me';
 
-// Utiliser la même base de données que server.js
-const db = require('./database');
-
-// Middleware pour vérifier le token
 function verifyToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -25,7 +22,6 @@ function verifyToken(req, res, next) {
   }
 }
 
-// Middleware pour vérifier si c'est un super admin
 function verifySuperAdmin(req, res, next) {
   if (req.user.role !== 'superadmin') {
     return res.status(403).json({ error: 'Accès refusé. Super admin requis.' });
@@ -33,25 +29,26 @@ function verifySuperAdmin(req, res, next) {
   next();
 }
 
-// Vérifier les identifiants et générer un token
 function login(username, password, callback) {
   if (!username || !password) {
     return callback(null);
   }
 
-  db.get(
-    'SELECT * FROM admins WHERE username = ?',
+  pool.query(
+    'SELECT * FROM admins WHERE username = $1',
     [username],
-    (err, admin) => {
+    (err, result) => {
       if (err) {
         console.error('Erreur recherche admin:', err);
         return callback(null);
       }
 
-      if (!admin) {
+      if (result.rows.length === 0) {
         console.log('Admin non trouvé:', username);
         return callback(null);
       }
+
+      const admin = result.rows[0];
 
       bcrypt.compare(password, admin.password, (err, isMatch) => {
         if (err) {
@@ -86,24 +83,25 @@ function login(username, password, callback) {
   );
 }
 
-// Changer le mot de passe
 function changePassword(userId, oldPassword, newPassword, callback) {
   if (!userId || !oldPassword || !newPassword) {
     return callback(false, 'Paramètres manquants');
   }
 
-  db.get(
-    'SELECT password FROM admins WHERE id = ?',
+  pool.query(
+    'SELECT password FROM admins WHERE id = $1',
     [userId],
-    (err, admin) => {
+    (err, result) => {
       if (err) {
         console.error('Erreur recherche admin:', err);
         return callback(false, 'Erreur serveur');
       }
 
-      if (!admin) {
+      if (result.rows.length === 0) {
         return callback(false, 'Admin introuvable');
       }
+
+      const admin = result.rows[0];
 
       bcrypt.compare(oldPassword, admin.password, (err, isMatch) => {
         if (err) {
@@ -117,8 +115,8 @@ function changePassword(userId, oldPassword, newPassword, callback) {
 
         const hashedPassword = bcrypt.hashSync(newPassword, 10);
 
-        db.run(
-          'UPDATE admins SET password = ? WHERE id = ?',
+        pool.query(
+          'UPDATE admins SET password = $1 WHERE id = $2',
           [hashedPassword, userId],
           (err) => {
             if (err) {
@@ -140,5 +138,5 @@ module.exports = {
   verifySuperAdmin, 
   login, 
   changePassword,
-  db // Exporter db pour les routes super admin
+  pool
 };

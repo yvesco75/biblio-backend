@@ -21,28 +21,32 @@ async function init() {
     `);
     console.log('✅ Table admins créée');
 
-    // Créer super admin
-    const hashedPassword = bcrypt.hashSync('SuperAdmin2025!', 10);
-    await pool.query(
-      `INSERT INTO admins (username, password, role) 
-       VALUES ($1, $2, $3) 
-       ON CONFLICT (username) DO NOTHING`,
-      ['superadmin', hashedPassword, 'superadmin']
-    );
+    // Vérifier si les comptes existent déjà
+    const checkSuper = await pool.query('SELECT * FROM admins WHERE username = $1', ['superadmin']);
+    const checkAdmin = await pool.query('SELECT * FROM admins WHERE username = $1', ['admin']);
 
-    // Créer admin normal
-    const hashedAdmin = bcrypt.hashSync('admin123', 10);
-    await pool.query(
-      `INSERT INTO admins (username, password, role) 
-       VALUES ($1, $2, $3) 
-       ON CONFLICT (username) DO NOTHING`,
-      ['admin', hashedAdmin, 'admin']
-    );
+    if (checkSuper.rows.length === 0) {
+      const hashedPassword = bcrypt.hashSync('SuperAdmin2025!', 10);
+      await pool.query(
+        'INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)',
+        ['superadmin', hashedPassword, 'superadmin']
+      );
+      console.log('✅ Superadmin créé : superadmin / SuperAdmin2025!');
+    } else {
+      console.log('ℹ️  Superadmin existe déjà');
+    }
 
-    console.log('✅ Comptes créés :');
-    console.log('   superadmin / SuperAdmin2025!');
-    console.log('   admin / admin123');
-    
+    if (checkAdmin.rows.length === 0) {
+      const hashedAdmin = bcrypt.hashSync('admin123', 10);
+      await pool.query(
+        'INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)',
+        ['admin', hashedAdmin, 'admin']
+      );
+      console.log('✅ Admin créé : admin / admin123');
+    } else {
+      console.log('ℹ️  Admin existe déjà');
+    }
+
     await pool.end();
     process.exit(0);
   } catch (error) {

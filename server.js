@@ -18,6 +18,27 @@ const upload = multer({
 app.use(cors());
 app.use(express.json());
 
+// ==================== AUTO-CRÉATION COMPTES ADMIN ====================
+(async () => {
+  try {
+    const checkSuper = await pool.query('SELECT * FROM admins WHERE username = $1', ['superadmin']);
+    
+    if (checkSuper.rows.length === 0) {
+      const hashedSuper = bcrypt.hashSync('SuperAdmin2025!', 10);
+      const hashedAdmin = bcrypt.hashSync('admin123', 10);
+      
+      await pool.query('INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)', ['superadmin', hashedSuper, 'superadmin']);
+      await pool.query('INSERT INTO admins (username, password, role) VALUES ($1, $2, $3)', ['admin', hashedAdmin, 'admin']);
+      
+      console.log('✅ Comptes admin créés : superadmin / SuperAdmin2025! | admin / admin123');
+    } else {
+      console.log('ℹ️  Comptes admin déjà existants');
+    }
+  } catch (err) {
+    console.error('❌ Init admins:', err.message);
+  }
+})();
+
 // ==================== ROUTES PUBLIQUES ====================
 
 app.get('/api/search-membres/:telephone', (req, res) => {

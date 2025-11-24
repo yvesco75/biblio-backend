@@ -210,22 +210,36 @@ app.post('/api/membres', verifyToken, (req, res) => {
     return res.status(400).json({ error: 'Nom, prénom et téléphone sont requis' });
   }
 
+  // Vérifier si nom+prénom existe déjà
   pool.query(
-    'INSERT INTO membres (nom, prenom, telephone, lien) VALUES ($1, $2, $3, $4) RETURNING id',
-    [nom.trim(), prenom.trim(), telephone.trim(), lien?.trim() || 'Membre'],
-    (err, result) => {
+    'SELECT * FROM membres WHERE LOWER(nom) = LOWER($1) AND LOWER(prenom) = LOWER($2) AND statut = $3',
+    [nom.trim(), prenom.trim(), 'actif'],
+    (err, checkResult) => {
       if (err) {
-        console.error('Erreur ajout membre:', err);
-        if (err.code === '23505') {
-          return res.status(400).json({ error: 'Ce numéro de téléphone existe déjà' });
-        }
+        console.error('Erreur vérification doublon:', err);
         return res.status(500).json({ error: 'Erreur serveur' });
       }
-      res.json({
-        success: true,
-        message: 'Membre ajouté avec succès',
-        id: result.rows[0].id
-      });
+
+      if (checkResult.rows.length > 0) {
+        return res.status(400).json({ error: 'Cette personne est déjà enregistrée' });
+      }
+
+      // Insérer le nouveau membre
+      pool.query(
+        'INSERT INTO membres (nom, prenom, telephone, lien) VALUES ($1, $2, $3, $4) RETURNING id',
+        [nom.trim(), prenom.trim(), telephone.trim(), lien?.trim() || 'Étudiant'],
+        (err, result) => {
+          if (err) {
+            console.error('Erreur ajout membre:', err);
+            return res.status(500).json({ error: 'Erreur serveur' });
+          }
+          res.json({
+            success: true,
+            message: 'Membre ajouté avec succès',
+            id: result.rows[0].id
+          });
+        }
+      );
     }
   );
 });

@@ -425,6 +425,318 @@ app.delete('/api/membres/:id', verifyToken, (req, res) => {
   });
 });
 
+
+// Statistiques par sexe
+app.get('/api/stats/sexe', verifyToken, (req, res) => {
+  pool.query(
+    `SELECT sexe, COUNT(*) as total 
+     FROM membres 
+     WHERE statut = $1 
+     GROUP BY sexe 
+     ORDER BY total DESC`,
+    ['actif'],
+    (err, result) => {
+      if (err) {
+        console.error('Erreur stats sexe:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+      res.json(result.rows);
+    }
+  );
+});
+
+// Statistiques par motif de visite
+app.get('/api/stats/motifs', verifyToken, (req, res) => {
+  pool.query(
+    `SELECT motif, COUNT(*) as total 
+     FROM mouvements 
+     WHERE motif IS NOT NULL 
+     AND type = $1
+     GROUP BY motif 
+     ORDER BY total DESC`,
+    ['entrée'],
+    (err, result) => {
+      if (err) {
+        console.error('Erreur stats motifs:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+      res.json(result.rows);
+    }
+  );
+});
+
+// Statistiques par catégorie (lien)
+app.get('/api/stats/categories', verifyToken, (req, res) => {
+  pool.query(
+    `SELECT lien, COUNT(*) as total 
+     FROM membres 
+     WHERE statut = $1 
+     GROUP BY lien 
+     ORDER BY total DESC`,
+    ['actif'],
+    (err, result) => {
+      if (err) {
+        console.error('Erreur stats catégories:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+      res.json(result.rows);
+    }
+  );
+});
+
+// Évolution des visites (7 derniers jours)
+app.get('/api/stats/evolution', verifyToken, (req, res) => {
+  pool.query(
+    `SELECT 
+       DATE(date_heure) as date,
+       COUNT(*) as total
+     FROM mouvements
+     WHERE type = $1
+     AND date_heure >= CURRENT_DATE - INTERVAL '7 days'
+     GROUP BY DATE(date_heure)
+     ORDER BY date ASC`,
+    ['entrée'],
+    (err, result) => {
+      if (err) {
+        console.error('Erreur stats évolution:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+      res.json(result.rows);
+    }
+  );
+});
+
+// Top 10 visiteurs
+app.get('/api/stats/top-visiteurs', verifyToken, (req, res) => {
+  pool.query(
+    `SELECT 
+       m.nom, 
+       m.prenom,
+       m.sexe,
+       m.lien,
+       COUNT(*) as nombre_visites
+     FROM mouvements mv
+     JOIN membres m ON mv.membre_id = m.id
+     WHERE mv.type = $1
+     AND m.statut = $2
+     GROUP BY m.id, m.nom, m.prenom, m.sexe, m.lien
+     ORDER BY nombre_visites DESC
+     LIMIT 10`,
+    ['entrée', 'actif'],
+    (err, result) => {
+      if (err) {
+        console.error('Erreur top visiteurs:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+      res.json(result.rows);
+    }
+  );
+});
+
+// Statistiques globales enrichies
+app.get('/api/stats/global', verifyToken, (req, res) => {
+  Promise.all([
+    // Total membres actifs
+    pool.query('SELECT COUNT(*) as total FROM membres WHERE statut = $1', ['actif']),
+    
+    // Présents maintenant
+    pool.query(`
+      SELECT COUNT(DISTINCT membre_id) as total 
+      FROM mouvements m1 
+      WHERE type = $1 
+      AND id = (SELECT MAX(id) FROM mouvements WHERE membre_id = m1.membre_id)
+    `, ['entrée']),
+    
+    // Total visites aujourd'hui
+    pool.query(`
+      SELECT COUNT(*) as total 
+      FROM mouvements 
+      WHERE DATE(date_heure) = CURRENT_DATE 
+      AND type = $1
+    `, ['entrée']),
+    
+    // Répartition hommes/femmes
+    pool.query(`
+      SELECT sexe, COUNT(*) as total 
+      FROM membres 
+      WHERE statut = $1 
+      GROUP BY sexe
+    `, ['actif'])
+  ])
+  .then(([membresRes, presentsRes, visitesRes, sexeRes]) => {
+    res.json({
+      totalMembres: parseInt(membresRes.rows[0].total) || 0,
+      presentsAujourdhui: parseInt(presentsRes.rows[0].total) || 0,
+      visitesAujourdhui: parseInt(visitesRes.rows[0].total) || 0,
+      repartitionSexe: sexeRes.rows
+    });
+  })
+  .catch(err => {
+    console.error('Erreur stats global:', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  });
+});
+
+
+// MODIFIER la route POST /api/pointer-by-id pour inclure le motif
+app.post('/api/pointer-by-id', (req, res) => {
+  const { membreId, motif } = req.body; // Ajout du motif
+  if (!membreId) return res.status(400).json({ error: 'ID membre requis' });
+
+  pool.query(
+    'SELECT * FROM membres WHERE id = $1 AND statut = $2',
+    [membreId, 'actif'],
+    (err, result) => {
+      if (err || result.rows.length === 0) {
+        return res.status(404).json({ error: 'Membre non trouvé' });
+      }
+      
+      const membre = result.rows[0];
+
+      pool.query(
+        'SELECT type FROM mouvements WHERE membre_id = $1 ORDER BY date_heure DESC LIMIT 1',
+        [membre.id],
+        (err, mvtResult) => {
+          if (err) return res.status(500).json({ error: 'Erreur serveur' });
+
+          const type = (mvtResult.rows.length > 0 && mvtResult.rows[0].type === 'entrée') ? 'sortie' : 'entrée';
+
+          // Enregistrer le motif seulement pour les entrées
+          const motifValue = (type === 'entrée' && motif) ? motif : null;
+
+          pool.query(
+            'INSERT INTO mouvements (membre_id, type, motif) VALUES ($1, $2, $3)',
+            [membre.id, type, motifValue],
+            (err) => {
+              if (err) return res.status(500).json({ error: 'Erreur enregistrement' });
+              res.json({
+                success: true,
+                membre: {
+                  nom: membre.nom,
+                  prenom: membre.prenom,
+                  lien: membre.lien || 'Membre'
+                },
+                type: type,
+                message: `${type.toUpperCase()} enregistrée avec succès`
+              });
+            }
+          );
+        }
+      );
+    }
+  );
+});
+
+
+// MODIFIER la route POST /api/membres pour inclure le sexe
+app.post('/api/membres', verifyToken, (req, res) => {
+  const { nom, prenom, telephone, lien, sexe } = req.body; // Ajout du sexe
+
+  if (!/^\d{8,}$/.test(telephone)) {
+    return res.status(400).json({ error: 'Le téléphone doit contenir au moins 8 chiffres' });
+  }
+  if (!nom || !prenom || !telephone || !sexe) {
+    return res.status(400).json({ error: 'Nom, prénom, téléphone et sexe sont requis' });
+  }
+
+  pool.query(
+    'SELECT * FROM membres WHERE LOWER(nom) = LOWER($1) AND LOWER(prenom) = LOWER($2) AND statut = $3',
+    [nom.trim(), prenom.trim(), 'actif'],
+    (err, checkResult) => {
+      if (err) {
+        console.error('Erreur vérification doublon:', err);
+        return res.status(500).json({ error: 'Erreur serveur' });
+      }
+
+      if (checkResult.rows.length > 0) {
+        return res.status(400).json({ error: 'Cette personne est déjà enregistrée' });
+      }
+
+      pool.query(
+        'INSERT INTO membres (nom, prenom, telephone, sexe, lien) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [nom.trim(), prenom.trim(), telephone.trim(), sexe.trim(), lien?.trim() || 'Étudiant'],
+        (err, result) => {
+          if (err) {
+            console.error('Erreur ajout membre:', err);
+            return res.status(500).json({ error: 'Erreur serveur' });
+          }
+          res.json({
+            success: true,
+            message: 'Membre ajouté avec succès',
+            id: result.rows[0].id
+          });
+        }
+      );
+    }
+  );
+});
+
+
+// MODIFIER la route POST /api/import pour inclure le sexe
+app.post('/api/import', verifyToken, upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier fourni' });
+
+  try {
+    const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(sheet);
+
+    if (data.length === 0) {
+      return res.status(400).json({ error: 'Le fichier est vide' });
+    }
+
+    let importes = 0;
+    let erreurs = 0;
+    const errors = [];
+
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+      const nom = row.nom || row.Nom || row.NOM;
+      const prenom = row.prenom || row.Prenom || row.PRENOM || row.Prénom;
+      const telephone = row.telephone || row.Telephone || row.TELEPHONE || row.Téléphone;
+      const lien = row.lien || row.Lien || row.LIEN || 'Membre';
+      const sexe = row.sexe || row.Sexe || row.SEXE || 'Non spécifié'; // Ajout du sexe
+
+      if (!nom || !prenom || !telephone) {
+        erreurs++;
+        errors.push(`Ligne ${i + 2}: Données manquantes`);
+        continue;
+      }
+
+      try {
+        await pool.query(
+          'INSERT INTO membres (nom, prenom, telephone, sexe, lien) VALUES ($1, $2, $3, $4, $5)',
+          [nom.trim(), prenom.trim(), telephone.trim(), sexe.trim(), lien.trim()]
+        );
+        importes++;
+      } catch (err) {
+        erreurs++;
+        if (err.code === '23505') {
+          errors.push(`Ligne ${i + 2}: ${telephone} existe déjà`);
+        } else {
+          errors.push(`Ligne ${i + 2}: ${err.message}`);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Import terminé: ${importes} ajoutés, ${erreurs} erreurs`,
+      importes,
+      erreurs,
+      errors: errors.slice(0, 10)
+    });
+  } catch (error) {
+    console.error('Erreur import:', error);
+    res.status(500).json({ error: 'Erreur lecture fichier: ' + error.message });
+  }
+});
+
+
+
+
+
 app.get('/api/stats', verifyToken, (req, res) => {
   pool.query('SELECT COUNT(*) as total FROM membres WHERE statut = $1', ['actif'], (err, membresResult) => {
     if (err) {

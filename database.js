@@ -11,37 +11,56 @@ const pool = new Pool({
 const initTables = async () => {
   try {
     // ==================== TABLE MEMBRES ====================
-    // MODIFIÉ : Ajout colonne 'sexe'
     await pool.query(`
       CREATE TABLE IF NOT EXISTS membres (
         id SERIAL PRIMARY KEY,
         nom TEXT NOT NULL,
         prenom TEXT NOT NULL,
         telephone TEXT NOT NULL,
-        sexe TEXT DEFAULT 'Non spécifié',
         lien TEXT DEFAULT 'Membre',
         date_inscription TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         statut TEXT DEFAULT 'actif'
       )
     `);
-    console.log('✅ Table membres créée/mise à jour avec colonne sexe');
+    console.log('✅ Table membres créée');
+
+    // Ajouter colonne sexe si elle n'existe pas
+    const checkSexe = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='membres' AND column_name='sexe'
+    `);
+    
+    if (checkSexe.rows.length === 0) {
+      await pool.query(`ALTER TABLE membres ADD COLUMN sexe TEXT DEFAULT 'Non spécifié'`);
+      console.log('✅ Colonne sexe ajoutée à membres');
+    }
 
     // ==================== TABLE MOUVEMENTS ====================
-    // MODIFIÉ : Ajout colonne 'motif'
     await pool.query(`
       CREATE TABLE IF NOT EXISTS mouvements (
         id SERIAL PRIMARY KEY,
         membre_id INTEGER NOT NULL,
         type TEXT NOT NULL,
-        motif TEXT,
         date_heure TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (membre_id) REFERENCES membres(id) ON DELETE CASCADE
       )
     `);
-    console.log('✅ Table mouvements créée/mise à jour avec colonne motif');
+    console.log('✅ Table mouvements créée');
+
+    // Ajouter colonne motif si elle n'existe pas
+    const checkMotif = await pool.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name='mouvements' AND column_name='motif'
+    `);
+    
+    if (checkMotif.rows.length === 0) {
+      await pool.query(`ALTER TABLE mouvements ADD COLUMN motif TEXT`);
+      console.log('✅ Colonne motif ajoutée à mouvements');
+    }
 
     // ==================== TABLE ADMINS ====================
-    // Inchangée
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admins (
         id SERIAL PRIMARY KEY,
@@ -53,7 +72,7 @@ const initTables = async () => {
     `);
     console.log('✅ Table admins créée');
 
-    // ==================== INDEX POUR PERFORMANCES ====================
+    // ==================== INDEX ====================
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_membres_telephone ON membres(telephone);
       CREATE INDEX IF NOT EXISTS idx_membres_statut ON membres(statut);
@@ -62,9 +81,9 @@ const initTables = async () => {
       CREATE INDEX IF NOT EXISTS idx_mouvements_type ON mouvements(type);
       CREATE INDEX IF NOT EXISTS idx_mouvements_date ON mouvements(date_heure);
     `);
-    console.log('✅ Index créés pour optimisation');
+    console.log('✅ Index créés');
 
-    console.log('🎉 Tables PostgreSQL initialisées avec succès !');
+    console.log('🎉 Base de données initialisée avec succès');
   } catch (error) {
     console.error('❌ Erreur init tables:', error);
   }

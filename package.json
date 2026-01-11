@@ -8,6 +8,7 @@
     "dev": "nodemon server.js",
     "reset": "node resetDatabase.js",
     "init-db": "node initSuperAdmin.js",
+    "clear": "node clearMembers.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [

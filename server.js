@@ -201,7 +201,7 @@ app.delete('/api/admins/:id', verifyToken, verifySuperAdmin, (req, res) => {
 // ==================== ROUTES MEMBRES ====================
 
 app.post('/api/membres', verifyToken, (req, res) => {
-  const { nom, prenom, telephone, lien } = req.body;
+  const { nom, prenom, telephone, sexe, lien } = req.body;
 
   if (!/^\d{8,}$/.test(telephone)) {
     return res.status(400).json({ error: 'Le téléphone doit contenir au moins 8 chiffres' });
@@ -210,10 +210,10 @@ app.post('/api/membres', verifyToken, (req, res) => {
     return res.status(400).json({ error: 'Nom, prénom et téléphone sont requis' });
   }
 
-  // Vérifier si nom+prénom existe déjà
+  // Vérifier doublon nom+prénom
   pool.query(
-    'SELECT * FROM membres WHERE LOWER(nom) = LOWER($1) AND LOWER(prenom) = LOWER($2) AND statut = $3',
-    [nom.trim(), prenom.trim(), 'actif'],
+    'SELECT * FROM membres WHERE LOWER(TRIM(nom)) = LOWER(TRIM($1)) AND LOWER(TRIM(prenom)) = LOWER(TRIM($2)) AND statut = $3',
+    [nom, prenom, 'actif'],
     (err, checkResult) => {
       if (err) {
         console.error('Erreur vérification doublon:', err);
@@ -221,13 +221,13 @@ app.post('/api/membres', verifyToken, (req, res) => {
       }
 
       if (checkResult.rows.length > 0) {
-        return res.status(400).json({ error: 'Cette personne est déjà enregistrée' });
+        return res.status(400).json({ error: 'Cette personne (même nom et prénom) est déjà enregistrée' });
       }
 
-      // Insérer le nouveau membre
+      // Insérer avec sexe
       pool.query(
-        'INSERT INTO membres (nom, prenom, telephone, lien) VALUES ($1, $2, $3, $4) RETURNING id',
-        [nom.trim(), prenom.trim(), telephone.trim(), lien?.trim() || 'Étudiant'],
+        'INSERT INTO membres (nom, prenom, telephone, sexe, lien) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+        [nom.trim(), prenom.trim(), telephone.trim(), sexe || 'Non spécifié', lien?.trim() || 'Étudiant'],
         (err, result) => {
           if (err) {
             console.error('Erreur ajout membre:', err);
@@ -580,7 +580,7 @@ app.get('/api/stats/global', verifyToken, (req, res) => {
 
 // MODIFIER la route POST /api/pointer-by-id pour inclure le motif
 app.post('/api/pointer-by-id', (req, res) => {
-  const { membreId, motif } = req.body; // Ajout du motif
+  const { membreId, motif } = req.body;
   if (!membreId) return res.status(400).json({ error: 'ID membre requis' });
 
   pool.query(
@@ -601,7 +601,7 @@ app.post('/api/pointer-by-id', (req, res) => {
 
           const type = (mvtResult.rows.length > 0 && mvtResult.rows[0].type === 'entrée') ? 'sortie' : 'entrée';
 
-          // Enregistrer le motif seulement pour les entrées
+          // MOTIF UNIQUEMENT POUR LES ENTRÉES
           const motifValue = (type === 'entrée' && motif) ? motif : null;
 
           pool.query(

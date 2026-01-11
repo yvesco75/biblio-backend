@@ -59,7 +59,7 @@ app.get('/api/search-membres/:telephone', (req, res) => {
 });
 
 app.post('/api/pointer-by-id', (req, res) => {
-  const { membreId } = req.body;
+  const { membreId, motif } = req.body;
   if (!membreId) return res.status(400).json({ error: 'ID membre requis' });
 
   pool.query(
@@ -79,10 +79,11 @@ app.post('/api/pointer-by-id', (req, res) => {
           if (err) return res.status(500).json({ error: 'Erreur serveur' });
 
           const type = (mvtResult.rows.length > 0 && mvtResult.rows[0].type === 'entrée') ? 'sortie' : 'entrée';
+          const motifValue = (type === 'entrée' && motif) ? motif : null;
 
           pool.query(
-            'INSERT INTO mouvements (membre_id, type) VALUES ($1, $2)',
-            [membre.id, type],
+            'INSERT INTO mouvements (membre_id, type, motif) VALUES ($1, $2, $3)',
+            [membre.id, type, motifValue],
             (err) => {
               if (err) return res.status(500).json({ error: 'Erreur enregistrement' });
               res.json({
@@ -93,6 +94,7 @@ app.post('/api/pointer-by-id', (req, res) => {
                   lien: membre.lien || 'Membre'
                 },
                 type: type,
+                needMotif: type === 'entrée',
                 message: `${type.toUpperCase()} enregistrée avec succès`
               });
             }
@@ -783,3 +785,15 @@ process.on('SIGINT', () => {
   pool.end();
   process.exit(0);
 });
+
+
+
+// ROUTE TEMPORAIRE - À SUPPRIMER APRÈS USAGE
+app.delete('/api/clear-all-members', verifyToken, verifySuperAdmin, async (req, res) => {
+  try {
+    await pool.query('TRUNCATE TABLE mouvements, membres RESTART IDENTITY CASCADE');
+    res.json({ success: true, message: 'Tous les membres supprimés' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+})

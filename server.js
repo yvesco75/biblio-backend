@@ -448,11 +448,13 @@ app.get('/api/stats/sexe', verifyToken, (req, res) => {
 // Statistiques par motif de visite
 app.get('/api/stats/motifs', verifyToken, (req, res) => {
   pool.query(
-    `SELECT motif, COUNT(*) as total 
+    `SELECT 
+       TRIM(UNNEST(string_to_array(motif, ','))) as motif,
+       COUNT(*) as total 
      FROM mouvements 
      WHERE motif IS NOT NULL 
      AND type = $1
-     GROUP BY motif 
+     GROUP BY TRIM(UNNEST(string_to_array(motif, ',')))
      ORDER BY total DESC`,
     ['entrée'],
     (err, result) => {
@@ -468,10 +470,12 @@ app.get('/api/stats/motifs', verifyToken, (req, res) => {
 // Statistiques par catégorie (lien)
 app.get('/api/stats/categories', verifyToken, (req, res) => {
   pool.query(
-    `SELECT lien, COUNT(*) as total 
+    `SELECT 
+       COALESCE(NULLIF(TRIM(lien), ''), 'Non spécifié') as lien,
+       COUNT(*) as total 
      FROM membres 
      WHERE statut = $1 
-     GROUP BY lien 
+     GROUP BY COALESCE(NULLIF(TRIM(lien), ''), 'Non spécifié')
      ORDER BY total DESC`,
     ['actif'],
     (err, result) => {

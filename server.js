@@ -200,6 +200,18 @@ app.delete('/api/admins/:id', verifyToken, verifySuperAdmin, (req, res) => {
   });
 });
 
+// SUPPRIMER TOUS LES MEMBRES
+app.post('/api/reset-membres', verifyToken, verifySuperAdmin, async (req, res) => {
+  try {
+    await pool.query('TRUNCATE TABLE mouvements, membres RESTART IDENTITY CASCADE');
+    res.json({ success: true, message: 'Base réinitialisée' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+
 // ==================== ROUTES MEMBRES ====================
 
 app.post('/api/membres', verifyToken, (req, res) => {

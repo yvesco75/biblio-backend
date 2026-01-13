@@ -58,6 +58,8 @@ app.get('/api/search-membres/:telephone', (req, res) => {
   );
 });
 
+// REMPLACE la route /api/pointer-by-id par ceci:
+
 app.post('/api/pointer-by-id', (req, res) => {
   const { membreId, motif } = req.body;
   if (!membreId) return res.status(400).json({ error: 'ID membre requis' });
@@ -72,65 +74,29 @@ app.post('/api/pointer-by-id', (req, res) => {
       
       const membre = result.rows[0];
 
-      // Récupérer le dernier mouvement pour déterminer le type à enregistrer
       pool.query(
         'SELECT type FROM mouvements WHERE membre_id = $1 ORDER BY date_heure DESC LIMIT 1',
         [membre.id],
         (err, mvtResult) => {
-          if (err) {
-            console.error('Erreur récupération dernier mouvement:', err);
-            return res.status(500).json({ error: 'Erreur serveur' });
-          }
+          if (err) return res.status(500).json({ error: 'Erreur serveur' });
 
-          // LOGIQUE CORRIGÉE :
-          // - Si pas de mouvement OU dernier mouvement = "sortie" → enregistrer "entrée"
-          // - Si dernier mouvement = "entrée" → enregistrer "sortie"
-          let type;
-          if (mvtResult.rows.length === 0) {
-            // Premier pointage de ce membre → ENTRÉE
-            type = 'entrée';
-          } else {
-            // Alterner : si dernière action = "entrée" → faire "sortie" et vice-versa
-            type = mvtResult.rows[0].type === 'entrée' ? 'sortie' : 'entrée';
-          }
+          // SI PAS DE MOUVEMENT OU DERNIER = SORTIE → ENTRÉE
+          // SI DERNIER = ENTRÉE → SORTIE
+          const dernierType = mvtResult.rows.length > 0 ? mvtResult.rows[0].type : null;
+          const type = (dernierType === 'entrée') ? 'sortie' : 'entrée';
 
-          // Le motif est OBLIGATOIRE uniquement pour les ENTRÉES
-          if (type === 'entrée' && !motif) {
-            return res.status(400).json({ 
-              error: 'Le motif de visite est requis pour une entrée',
-              needMotif: true 
-            });
-          }
-
-          // Le motif n'est enregistré QUE pour les entrées
           const motifValue = (type === 'entrée' && motif) ? motif : null;
 
-          // Enregistrer le mouvement
           pool.query(
-            'INSERT INTO mouvements (membre_id, type, motif) VALUES ($1, $2, $3) RETURNING id',
+            'INSERT INTO mouvements (membre_id, type, motif) VALUES ($1, $2, $3)',
             [membre.id, type, motifValue],
-            (err, insertResult) => {
-              if (err) {
-                console.error('Erreur enregistrement mouvement:', err);
-                return res.status(500).json({ error: 'Erreur enregistrement' });
-              }
-
-              console.log(`✅ ${type.toUpperCase()} enregistrée: ${membre.prenom} ${membre.nom}${motifValue ? ` - Motif: ${motifValue}` : ''}`);
-
+            (err) => {
+              if (err) return res.status(500).json({ error: 'Erreur enregistrement' });
               res.json({
                 success: true,
-                membre: {
-                  nom: membre.nom,
-                  prenom: membre.prenom,
-                  lien: membre.lien || 'Membre',
-                  sexe: membre.sexe || 'Non spécifié'
-                },
                 type: type,
-                motif: motifValue,
-                mouvementId: insertResult.rows[0].id,
-                message: type === 'entrée' 
-                  ? `Bienvenue ${membre.prenom} ! Entrée enregistrée avec succès` 
-                  : `Au revoir ${membre.prenom} ! Sortie enregistrée avec succès`
+                membre: { nom: membre.nom, prenom: membre.prenom },
+                message: `${type.toUpperCase()} enregistrée`
               });
             }
           );

@@ -281,6 +281,7 @@ app.post('/api/import', verifyToken, upload.single('file'), async (req, res) => 
       const prenom = row.prenom || row.Prenom || row.PRENOM || row.Prénom;
       const telephone = row.telephone || row.Telephone || row.TELEPHONE || row.Téléphone;
       const lien = row.lien || row.Lien || row.LIEN || 'Membre';
+      const sexe = row.sexe || row.Sexe || row.SEXE || 'Non spécifié';
 
       if (!nom || !prenom || !telephone) {
         erreurs++;
@@ -289,15 +290,16 @@ app.post('/api/import', verifyToken, upload.single('file'), async (req, res) => 
       }
 
       try {
+        // ✅ CORRECTION ICI : Ajout du champ sexe dans l'INSERT
         await pool.query(
-          'INSERT INTO membres (nom, prenom, telephone, lien) VALUES ($1, $2, $3, $4)',
-          [nom.trim(), prenom.trim(), telephone.trim(), lien.trim()]
+          'INSERT INTO membres (nom, prenom, telephone, sexe, lien) VALUES ($1, $2, $3, $4, $5)',
+          [nom.trim(), prenom.trim(), telephone.trim(), sexe.trim(), lien.trim()]
         );
         importes++;
       } catch (err) {
         erreurs++;
         if (err.code === '23505') {
-          errors.push(`Ligne ${i + 2}: ${telephone} existe déjà`);
+          errors.push(`Ligne ${i + 2}: Doublon détecté`);
         } else {
           errors.push(`Ligne ${i + 2}: ${err.message}`);
         }
